@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:roadhaven/screens/signup_page.dart';
 import 'package:roadhaven/screens/home_page.dart';
 import 'package:roadhaven/services/auth_service.dart';
+import 'package:roadhaven/main.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -35,7 +36,7 @@ class _LoginPageState extends State<LoginPage> {
       );
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const HomePage()),
+        MaterialPageRoute(builder: (_) => const BottomNavShell()),
       );
     } catch (e) {
       if (!mounted) return;

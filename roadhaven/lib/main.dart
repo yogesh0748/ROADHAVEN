@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:roadhaven/firebase_options.dart';
 import 'package:roadhaven/screens/login_page.dart';
 import 'package:roadhaven/screens/signup_page.dart';
+import 'package:roadhaven/screens/home_page.dart';
+import 'package:roadhaven/screens/profile_page.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -19,11 +22,20 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        primarySwatch: Colors.amber,
-        useMaterial3: true,
+      home: StreamBuilder<User?>(
+        stream: FirebaseAuth.instance.authStateChanges(),
+        builder: (context, snap) {
+          if (snap.connectionState == ConnectionState.waiting) {
+            return const Scaffold(
+              body: Center(child: CircularProgressIndicator()),
+            );
+          }
+          if (snap.hasData) {
+            return const BottomNavShell(); // show bottom nav after login
+          }
+          return const LoginPage(); // show login when signed out
+        },
       ),
-      home: const SplashScreen(),
     );
   }
 }
@@ -56,8 +68,9 @@ class _SplashScreenState extends State<SplashScreen>
     );
     Future.delayed(const Duration(seconds: 2), () {
       if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const WelcomePage()),
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const BottomNavShell()),
       );
     });
   }
@@ -254,6 +267,49 @@ class WelcomePage extends StatelessWidget {
           );
         },
       ),
+    );
+  }
+}
+
+class BottomNavShell extends StatefulWidget {
+  const BottomNavShell({super.key});
+
+  @override
+  State<BottomNavShell> createState() => _BottomNavShellState();
+}
+
+class _BottomNavShellState extends State<BottomNavShell> {
+  int _index = 0;
+  final _pages = const [
+    HomePage(),
+    _CommunityPage(),
+    ProfilePage(), // use the new profile screen
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: _pages[_index],
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _index,
+        onTap: (i) => setState(() => _index = i),
+        items: const [
+          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
+          BottomNavigationBarItem(icon: Icon(Icons.groups), label: 'Community'),
+          BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
+        ],
+      ),
+    );
+  }
+}
+
+class _CommunityPage extends StatelessWidget {
+  const _CommunityPage();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      body: Center(child: Text('Community')),
     );
   }
 }
