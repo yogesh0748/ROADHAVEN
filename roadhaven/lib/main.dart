@@ -5,6 +5,7 @@ import 'package:roadhaven/screens/login_page.dart';
 import 'package:roadhaven/screens/signup_page.dart';
 import 'package:roadhaven/screens/home_page.dart';
 import 'package:roadhaven/screens/profile_page.dart';
+import 'package:roadhaven/screens/community_page.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 Future<void> main() async {
@@ -282,7 +283,7 @@ class _BottomNavShellState extends State<BottomNavShell> {
   int _index = 0;
   final _pages = const [
     HomePage(),
-    _CommunityPage(),
+    CommunityPage(),
     ProfilePage(), // use the new profile screen
   ];
 
@@ -299,17 +300,6 @@ class _BottomNavShellState extends State<BottomNavShell> {
           BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
         ],
       ),
-    );
-  }
-}
-
-class _CommunityPage extends StatelessWidget {
-  const _CommunityPage();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Scaffold(
-      body: Center(child: Text('Community')),
     );
   }
 }

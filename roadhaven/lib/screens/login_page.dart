@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:roadhaven/screens/signup_page.dart';
-import 'package:roadhaven/screens/home_page.dart';
 import 'package:roadhaven/services/auth_service.dart';
 import 'package:roadhaven/main.dart';
 
