@@ -23,20 +23,46 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: StreamBuilder<User?>(
-        stream: FirebaseAuth.instance.authStateChanges(),
-        builder: (context, snap) {
-          if (snap.connectionState == ConnectionState.waiting) {
-            return const Scaffold(
-              body: Center(child: CircularProgressIndicator()),
-            );
-          }
-          if (snap.hasData) {
-            return const BottomNavShell(); // show bottom nav after login
-          }
-          return const LoginPage(); // show login when signed out
-        },
-      ),
+      home: const AppEntry(),
+    );
+  }
+}
+
+class AppEntry extends StatefulWidget {
+  const AppEntry({super.key});
+
+  @override
+  State<AppEntry> createState() => _AppEntryState();
+}
+
+class _AppEntryState extends State<AppEntry> {
+  bool _showSplash = true;
+
+  @override
+  void initState() {
+    super.initState();
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _showSplash = false);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_showSplash) {
+      return const SplashScreen();
+    }
+
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const SplashScreen();
+        }
+        if (snap.hasData) {
+          return const BottomNavShell(); // show bottom nav after login
+        }
+        return const LoginPage(); // show login when signed out
+      },
     );
   }
 }
@@ -67,13 +93,6 @@ class _SplashScreenState extends State<SplashScreen>
     _bob = Tween<double>(begin: -4, end: 4).animate(
       CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
     );
-    Future.delayed(const Duration(seconds: 2), () {
-      if (!mounted) return;
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const BottomNavShell()),
-      );
-    });
   }
 
   @override

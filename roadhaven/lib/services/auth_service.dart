@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 class AuthService {
   AuthService({FirebaseAuth? auth, FirebaseFirestore? firestore})
@@ -79,6 +80,41 @@ class AuthService {
   }
 
   Future<void> signOut() => _auth.signOut();
+
+  Future<UserCredential> signInWithGoogle() async {
+    final googleUser = await GoogleSignIn().signIn();
+    if (googleUser == null) {
+      throw FirebaseAuthException(
+        code: 'aborted-by-user',
+        message: 'Sign-in aborted.',
+      );
+    }
+
+    final googleAuth = await googleUser.authentication;
+    final credential = GoogleAuthProvider.credential(
+      accessToken: googleAuth.accessToken,
+      idToken: googleAuth.idToken,
+    );
+
+    final userCred = await _auth.signInWithCredential(credential);
+
+    // Upsert a basic profile entry for new users.
+    final user = userCred.user;
+    if (user != null) {
+      await _db.collection('users').doc(user.uid).set(
+        {
+          'email': user.email,
+          'displayName': user.displayName,
+          'photoURL': user.photoURL,
+          'provider': 'google',
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+    }
+
+    return userCred;
+  }
 
   String _normalizePhone(String phone) {
     final cleaned = phone.replaceAll(RegExp(r'[\s\-()]+'), '');

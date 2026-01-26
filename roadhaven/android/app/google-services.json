@@ -1,6 +1,7 @@
 {
   "project_info": {
     "project_number": "969973538198",
+    "firebase_url": "https://roadhaven-eed3e-default-rtdb.firebaseio.com",
     "project_id": "roadhaven-eed3e",
     "storage_bucket": "roadhaven-eed3e.firebasestorage.app"
   },
@@ -12,7 +13,12 @@
           "package_name": "com.example.roadhaven"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "969973538198-t3lm30bl0tiaa9s35rdrj3him5veqml5.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyAlX0sTwkUQHObihV11iLoX2GMCgOu65rM"
@@ -20,7 +26,19 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "969973538198-t3lm30bl0tiaa9s35rdrj3him5veqml5.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "969973538198-79vl30lc8prjufq2g2h6ukmk0jnmiqdi.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.roadhaven"
+              }
+            }
+          ]
         }
       }
     }
