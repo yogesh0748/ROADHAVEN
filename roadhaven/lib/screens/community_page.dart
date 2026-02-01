@@ -14,7 +14,7 @@ class CommunityPage extends StatefulWidget {
   State<CommunityPage> createState() => _CommunityPageState();
 }
 
-class _CommunityPageState extends State<CommunityPage> {
+class _CommunityPageState extends State<CommunityPage> with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   final _routeCtrl = TextEditingController();
   final _descriptionCtrl = TextEditingController();
@@ -40,6 +40,8 @@ class _CommunityPageState extends State<CommunityPage> {
   bool _safeAtNight = false;
   bool _goodNetwork = false;
   bool _policeCheckpost = false;
+  late final AnimationController _heroController;
+  late final Animation<double> _heroTilt;
   Position? _position;
   String? _positionText;
   bool _locating = false;
@@ -48,7 +50,7 @@ class _CommunityPageState extends State<CommunityPage> {
   String? _selectedVehicle;
   List<String> _vehicles = [];
   final _picker = ImagePicker();
-  List<XFile> _pickedPhotos = [];
+  final List<XFile> _pickedPhotos = [];
   List<String> _photoUrls = [];
   bool _uploadingPhotos = false;
   bool _markEmergency = false;
@@ -83,6 +85,10 @@ class _CommunityPageState extends State<CommunityPage> {
   @override
   void initState() {
     super.initState();
+    _heroController = AnimationController(vsync: this, duration: const Duration(seconds: 6))
+      ..repeat(reverse: true);
+    _heroTilt = Tween<double>(begin: -0.09, end: 0.09)
+        .animate(CurvedAnimation(parent: _heroController, curve: Curves.easeInOutSine));
     for (final entry in _tagOptions.entries) {
       _selectedTags[entry.key] = <String>{};
     }
@@ -91,6 +97,7 @@ class _CommunityPageState extends State<CommunityPage> {
 
   @override
   void dispose() {
+    _heroController.dispose();
     _routeCtrl.dispose();
     _descriptionCtrl.dispose();
     _landmarkCtrl.dispose();
@@ -206,7 +213,7 @@ class _CommunityPageState extends State<CommunityPage> {
     }
     try {
       final files = await _picker.pickMultiImage(imageQuality: 75);
-      if (files != null && files.isNotEmpty) {
+      if (files.isNotEmpty) {
         setState(() {
           _pickedPhotos.addAll(files.take(remaining));
         });
@@ -245,6 +252,24 @@ class _CommunityPageState extends State<CommunityPage> {
         });
       }
     }
+  }
+
+  Widget _glassCard({required Widget child}) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withOpacity(0.1)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.35),
+            blurRadius: 18,
+            offset: const Offset(0, 12),
+          ),
+        ],
+      ),
+      child: child,
+    );
   }
 
   Widget _buildRouteField() {
@@ -289,7 +314,7 @@ class _CommunityPageState extends State<CommunityPage> {
         const SizedBox(width: 12),
         Expanded(
           child: DropdownButtonFormField<String>(
-            value: _vehicleType,
+            initialValue: _vehicleType,
             decoration: const InputDecoration(labelText: 'Vehicle type'),
             items: _vehicleTypes
                 .map((v) => DropdownMenuItem<String>(value: v, child: Text(v)))
@@ -302,15 +327,13 @@ class _CommunityPageState extends State<CommunityPage> {
   }
 
   Widget _buildRatingCard() {
-    return Card(
-      elevation: 0,
-      color: Colors.grey.shade100,
+    return _glassCard(
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Experience rating', style: TextStyle(fontWeight: FontWeight.w700)),
+            const Text('Experience rating', style: TextStyle(fontWeight: FontWeight.w700, color: Colors.white)),
             const SizedBox(height: 8),
             _buildStarSelector('Overall experience', _overallRating, (v) => setState(() => _overallRating = v)),
             _buildStarSelector('Road quality', _roadQualityRating, (v) => setState(() => _roadQualityRating = v)),
@@ -332,17 +355,15 @@ class _CommunityPageState extends State<CommunityPage> {
             spacing: 2,
             children: List.generate(5, (index) {
               final active = index < value;
-              return SizedBox(
-                width: 40,
-                height: 40,
-                child: InkResponse(
-                  onTap: _posting ? null : () => onChanged(index + 1),
-                  radius: 22,
-                  containedInkWell: true,
+              return GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _posting ? null : () => onChanged(index + 1),
+                child: Padding(
+                  padding: const EdgeInsets.all(6),
                   child: Icon(
                     active ? Icons.star : Icons.star_border,
                     color: active ? Colors.orange : Colors.grey,
-                    size: 24,
+                    size: 26,
                   ),
                 ),
               );
@@ -357,9 +378,9 @@ class _CommunityPageState extends State<CommunityPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Quick tags', style: TextStyle(fontWeight: FontWeight.w700)),
+        const Text('Quick tags', style: TextStyle(fontWeight: FontWeight.w700, color: Colors.white)),
         const SizedBox(height: 8),
-        ..._tagOptions.entries.map((entry) => _buildTagWrap(entry.key, entry.value)).toList(),
+        ..._tagOptions.entries.map((entry) => _buildTagWrap(entry.key, entry.value)),
       ],
     );
   }
@@ -370,7 +391,7 @@ class _CommunityPageState extends State<CommunityPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(category, style: const TextStyle(fontWeight: FontWeight.w600)),
+          Text(category, style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.white)),
           const SizedBox(height: 4),
           Wrap(
             spacing: 6,
@@ -379,15 +400,17 @@ class _CommunityPageState extends State<CommunityPage> {
               return ChoiceChip(
                 label: Text(opt),
                 selected: selected,
-                onSelected: (_) {
-                  setState(() {
-                    if (selected) {
-                      _selectedTags[category]?.remove(opt);
-                    } else {
-                      _selectedTags[category]?.add(opt);
-                    }
-                  });
-                },
+                onSelected: _posting
+                    ? null
+                    : (_) {
+                        setState(() {
+                          if (selected) {
+                            _selectedTags[category]?.remove(opt);
+                          } else {
+                            _selectedTags[category]?.add(opt);
+                          }
+                        });
+                      },
               );
             }).toList(),
           ),
@@ -426,56 +449,60 @@ class _CommunityPageState extends State<CommunityPage> {
   }
 
   Widget _buildHelpfulDetails() {
-    return Card(
-      elevation: 0,
+    return _glassCard(
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Helpful details', style: TextStyle(fontWeight: FontWeight.w700)),
-            CheckboxListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              value: _hasFuelStations,
-              onChanged: (v) => setState(() => _hasFuelStations = v ?? false),
-              title: const Text('Fuel stations available'),
-            ),
-            CheckboxListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              value: _hasGoodFood,
-              onChanged: (v) => setState(() => _hasGoodFood = v ?? false),
-              title: const Text('Good food options'),
-            ),
-            CheckboxListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              value: _hasCleanRestrooms,
-              onChanged: (v) => setState(() => _hasCleanRestrooms = v ?? false),
-              title: const Text('Clean restrooms'),
-            ),
-            CheckboxListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              value: _safeAtNight,
-              onChanged: (v) => setState(() => _safeAtNight = v ?? false),
-              title: const Text('Safe for night travel'),
-            ),
-            CheckboxListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              value: _goodNetwork,
-              onChanged: (v) => setState(() => _goodNetwork = v ?? false),
-              title: const Text('Mobile network good'),
-            ),
-            CheckboxListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              value: _policeCheckpost,
-              onChanged: (v) => setState(() => _policeCheckpost = v ?? false),
-              title: const Text('Police checkpost present'),
-            ),
+            const Text('Helpful details', style: TextStyle(fontWeight: FontWeight.w700, color: Colors.white)),
+            ...[
+              CheckboxListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                value: _hasFuelStations,
+                onChanged: (v) => setState(() => _hasFuelStations = v ?? false),
+                title: const Text('Fuel stations available'),
+              ),
+              CheckboxListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                value: _hasGoodFood,
+                onChanged: (v) => setState(() => _hasGoodFood = v ?? false),
+                title: const Text('Good food options'),
+              ),
+              CheckboxListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                value: _hasCleanRestrooms,
+                onChanged: (v) => setState(() => _hasCleanRestrooms = v ?? false),
+                title: const Text('Clean restrooms'),
+              ),
+              CheckboxListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                value: _safeAtNight,
+                onChanged: (v) => setState(() => _safeAtNight = v ?? false),
+                title: const Text('Safe for night travel'),
+              ),
+              CheckboxListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                value: _goodNetwork,
+                onChanged: (v) => setState(() => _goodNetwork = v ?? false),
+                title: const Text('Mobile network good'),
+              ),
+              CheckboxListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                value: _policeCheckpost,
+                onChanged: (v) => setState(() => _policeCheckpost = v ?? false),
+                title: const Text('Police checkpost present'),
+              ),
+            ].map((tile) => Theme(
+                  data: Theme.of(context).copyWith(unselectedWidgetColor: Colors.white70),
+                  child: tile,
+                )),
           ],
         ),
       ),
@@ -520,6 +547,162 @@ class _CommunityPageState extends State<CommunityPage> {
     );
   }
 
+  Widget _buildBackground() {
+    return Stack(
+      children: [
+        Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFF050505), Color(0xFF0C1A2F)],
+            ),
+          ),
+        ),
+        Positioned(
+          left: -140,
+          top: 100,
+          child: Container(
+            width: 320,
+            height: 320,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: RadialGradient(
+                colors: [Colors.blue.withOpacity(0.22), Colors.transparent],
+              ),
+              boxShadow: const [
+                BoxShadow(color: Color(0x332D6BFF), blurRadius: 120, spreadRadius: 18),
+              ],
+            ),
+          ),
+        ),
+        Positioned(
+          right: -120,
+          bottom: 60,
+          child: Container(
+            width: 260,
+            height: 260,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: RadialGradient(
+                colors: [Colors.purple.withOpacity(0.18), Colors.transparent],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildHeroBanner() {
+    return AnimatedBuilder(
+      animation: _heroController,
+      builder: (context, child) {
+        final tilt = _heroTilt.value;
+        return Transform(
+          alignment: Alignment.center,
+          transform: Matrix4.identity()
+            ..setEntry(3, 2, 0.001)
+            ..rotateX(tilt)
+            ..rotateY(-tilt * 0.6),
+          child: child,
+        );
+      },
+      child: _glassCard(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: const [
+                    Text('Roadhaven Community',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 18,
+                          letterSpacing: -0.2,
+                        )),
+                    SizedBox(height: 6),
+                    Text(
+                      'Share live ride stories, safety tips, and hidden stops. Your ratings power the map.',
+                      style: TextStyle(color: Color(0xFFCED8EE), height: 1.4),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              _buildRoadTile(),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRoadTile() {
+    return Transform.translate(
+      offset: const Offset(0, -4),
+      child: Container(
+        width: 140,
+        height: 120,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+          gradient: const LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0xFF1B2233), Color(0xFF0F1320)],
+          ),
+          border: Border.all(color: Colors.white.withOpacity(0.08)),
+          boxShadow: const [
+            BoxShadow(color: Color(0x442D6BFF), blurRadius: 24, offset: Offset(0, 14)),
+          ],
+        ),
+        child: Stack(
+          children: [
+            Align(
+              alignment: Alignment.center,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(
+                  6,
+                  (i) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Container(
+                      width: 22,
+                      height: 6,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              bottom: 12,
+              left: 32,
+              child: Transform.rotate(
+                angle: -0.15,
+                child: const Icon(Icons.local_shipping, color: Color(0xFF7FB7FF), size: 22),
+              ),
+            ),
+            Positioned(
+              top: 16,
+              right: 24,
+              child: Transform.rotate(
+                angle: 0.12,
+                child: const Icon(Icons.directions_car, color: Color(0xFFFBC02D), size: 24),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildEmergencySection() {
     return Card(
       elevation: 0,
@@ -539,7 +722,7 @@ class _CommunityPageState extends State<CommunityPage> {
                 children: [
                   Expanded(
                     child: DropdownButtonFormField<String>(
-                      value: _alertType,
+                      initialValue: _alertType,
                       decoration: const InputDecoration(labelText: 'Alert type'),
                       items: _alertTypes
                           .map((t) => DropdownMenuItem<String>(value: t, child: Text(t)))
@@ -550,7 +733,7 @@ class _CommunityPageState extends State<CommunityPage> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: DropdownButtonFormField<String>(
-                      value: _urgency,
+                      initialValue: _urgency,
                       decoration: const InputDecoration(labelText: 'Urgency'),
                       items: _urgencies
                           .map((t) => DropdownMenuItem<String>(value: t, child: Text(t)))
@@ -577,7 +760,7 @@ class _CommunityPageState extends State<CommunityPage> {
           children: [
             const Text('Privacy settings', style: TextStyle(fontWeight: FontWeight.w700)),
             DropdownButtonFormField<String>(
-              value: _shareAs,
+              initialValue: _shareAs,
               decoration: const InputDecoration(labelText: 'Share as'),
               items: _shareOptions
                   .map((opt) => DropdownMenuItem<String>(value: opt, child: Text(opt)))
@@ -602,7 +785,7 @@ class _CommunityPageState extends State<CommunityPage> {
       padding: const EdgeInsets.only(bottom: 4),
       child: Row(
         children: [
-          SizedBox(width: 96, child: Text(label, style: const TextStyle(fontWeight: FontWeight.w600))),
+          SizedBox(width: 96, child: Text(label, style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.white))),
           Wrap(
             spacing: 2,
             children: List.generate(5, (index) {
@@ -707,7 +890,7 @@ class _CommunityPageState extends State<CommunityPage> {
   }
 
   Future<void> _openComposer({String? docId, Map<String, dynamic>? initialData}) async {
-    // Reset posting state so controls are interactive when composer opens
+    // Ensure controls are interactive when composer opens
     if (_posting) {
       setState(() => _posting = false);
     }
@@ -831,7 +1014,7 @@ class _CommunityPageState extends State<CommunityPage> {
                   const LinearProgressIndicator(minHeight: 2)
                 else if (_vehicles.isNotEmpty)
                   DropdownButtonFormField<String>(
-                    value: _selectedVehicle,
+                    initialValue: _selectedVehicle,
                     decoration: const InputDecoration(labelText: 'Saved vehicle (optional)'),
                     items: _vehicles
                         .map((v) => DropdownMenuItem<String>(value: v, child: Text(v)))
@@ -891,63 +1074,85 @@ class _CommunityPageState extends State<CommunityPage> {
   Widget build(BuildContext context) {
     return DefaultTabController(
       length: 2,
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Community'),
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.refresh),
-              tooltip: 'Reload vehicles',
-              onPressed: _loadVehicles,
+      child: Stack(
+        children: [
+          _buildBackground(),
+          Scaffold(
+            backgroundColor: Colors.transparent,
+            appBar: AppBar(
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              title: const Text('Community', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+              foregroundColor: Colors.white,
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.refresh),
+                  tooltip: 'Reload vehicles',
+                  onPressed: _loadVehicles,
+                ),
+              ],
+              bottom: const TabBar(
+                labelColor: Colors.white,
+                indicatorColor: Color(0xFF4D8DFF),
+                tabs: [
+                  Tab(text: 'All posts'),
+                  Tab(text: 'My posts'),
+                ],
+              ),
             ),
-          ],
-          bottom: const TabBar(
-            tabs: [
-              Tab(text: 'All posts'),
-              Tab(text: 'My posts'),
-            ],
-          ),
-        ),
-        floatingActionButton: FloatingActionButton.extended(
-          onPressed: _posting ? null : _openComposer,
-          icon: const Icon(Icons.post_add),
-          label: const Text('Post review'),
-        ),
-        body: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              child: Row(
+            floatingActionButton: FloatingActionButton.extended(
+              backgroundColor: const Color(0xFF1F2633),
+              onPressed: _posting ? null : _openComposer,
+              icon: const Icon(Icons.post_add),
+              label: const Text('Post review'),
+            ),
+            body: SafeArea(
+              child: Column(
                 children: [
-                  const Expanded(
-                    child: Text(
-                      'Latest posts from riders',
-                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                    child: _buildHeroBanner(),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+                    child: Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            'Latest posts from riders',
+                            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: Colors.white),
+                          ),
+                        ),
+                        ElevatedButton.icon(
+                          onPressed: _posting ? null : () => _openComposer(),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF242A35),
+                            foregroundColor: Colors.white,
+                          ),
+                          icon: const Icon(Icons.add_comment),
+                          label: const Text('Post'),
+                        ),
+                      ],
                     ),
                   ),
-                  ElevatedButton.icon(
-                    onPressed: _posting ? null : () => _openComposer(),
-                    icon: const Icon(Icons.add_comment),
-                    label: const Text('Post'),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: TabBarView(
+                      children: [
+                        _buildPostsList(stream: _allPostsQuery.snapshots()),
+                        _buildPostsList(
+                          stream: _myPostsQuery.snapshots(),
+                          emptyLabel: 'You have not posted yet.',
+                          sortCreatedAtDesc: true,
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 8),
-            Expanded(
-              child: TabBarView(
-                children: [
-                  _buildPostsList(stream: _allPostsQuery.snapshots()),
-                  _buildPostsList(
-                    stream: _myPostsQuery.snapshots(),
-                    emptyLabel: 'You have not posted yet.',
-                    sortCreatedAtDesc: true,
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -1076,7 +1281,7 @@ class _CommunityPageState extends State<CommunityPage> {
             final isOwner =
                 (data['userId'] != null) && data['userId'] == FirebaseAuth.instance.currentUser?.uid;
 
-            return Card(
+            return _glassCard(
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(
@@ -1088,7 +1293,7 @@ class _CommunityPageState extends State<CommunityPage> {
                         Expanded(
                           child: Text(
                             header,
-                            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: Colors.white),
                           ),
                         ),
                         if (isOwner)
@@ -1096,7 +1301,7 @@ class _CommunityPageState extends State<CommunityPage> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               IconButton(
-                                icon: const Icon(Icons.edit, size: 18),
+                                icon: const Icon(Icons.edit, size: 18, color: Colors.white70),
                                 tooltip: 'Edit your post',
                                 onPressed: () => _openComposer(
                                   docId: docs[index].id,
@@ -1104,7 +1309,7 @@ class _CommunityPageState extends State<CommunityPage> {
                                 ),
                               ),
                               IconButton(
-                                icon: const Icon(Icons.delete_outline, size: 18),
+                                icon: const Icon(Icons.delete_outline, size: 18, color: Colors.white70),
                                 tooltip: 'Delete your post',
                                 onPressed: () => _confirmDelete(docs[index].id),
                               ),
@@ -1113,7 +1318,7 @@ class _CommunityPageState extends State<CommunityPage> {
                         if (createdAt != null)
                           Text(
                             '${createdAt.toLocal()}'.split('.').first,
-                            style: const TextStyle(fontSize: 12, color: Colors.grey),
+                            style: const TextStyle(fontSize: 12, color: Colors.white60),
                           ),
                       ],
                     ),
@@ -1157,17 +1362,17 @@ class _CommunityPageState extends State<CommunityPage> {
                     ],
                     if (description.isNotEmpty) ...[
                       const SizedBox(height: 8),
-                      Text(description),
+                      Text(description, style: const TextStyle(color: Colors.white70)),
                     ],
                     const SizedBox(height: 12),
                     Row(
                       children: [
-                        const Icon(Icons.person, size: 14, color: Colors.grey),
+                        const Icon(Icons.person, size: 14, color: Colors.white60),
                         const SizedBox(width: 4),
                         Flexible(
                           child: Text(
                             author,
-                            style: const TextStyle(fontSize: 12, color: Colors.grey),
+                            style: const TextStyle(fontSize: 12, color: Colors.white70),
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),

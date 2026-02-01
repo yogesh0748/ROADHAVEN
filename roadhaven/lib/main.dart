@@ -4,8 +4,9 @@ import 'package:roadhaven/firebase_options.dart';
 import 'package:roadhaven/screens/login_page.dart';
 import 'package:roadhaven/screens/signup_page.dart';
 import 'package:roadhaven/screens/home_page.dart';
-import 'package:roadhaven/screens/profile_page.dart';
 import 'package:roadhaven/screens/community_page.dart';
+import 'package:roadhaven/screens/profile_page.dart';
+import 'package:roadhaven/screens/store_page.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 Future<void> main() async {
@@ -160,7 +161,7 @@ class _SplashScreenState extends State<SplashScreen>
                   minHeight: 4,
                   borderRadius: BorderRadius.circular(999),
                   color: colorScheme.primary,
-                  backgroundColor: colorScheme.surfaceVariant,
+                  backgroundColor: colorScheme.surfaceContainerHighest,
                 ),
               ),
             ],
@@ -177,7 +178,6 @@ class WelcomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final themedData = Theme.of(context).copyWith(
-      useMaterial3: true,
       colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
     );
 
@@ -303,6 +303,7 @@ class _BottomNavShellState extends State<BottomNavShell> {
   final _pages = const [
     HomePage(),
     CommunityPage(),
+    StorePage(),
     ProfilePage(), // use the new profile screen
   ];
 
@@ -310,14 +311,46 @@ class _BottomNavShellState extends State<BottomNavShell> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: _pages[_index],
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _index,
-        onTap: (i) => setState(() => _index = i),
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
-          BottomNavigationBarItem(icon: Icon(Icons.groups), label: 'Community'),
-          BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
-        ],
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(0.78),
+          boxShadow: const [
+            BoxShadow(color: Colors.black54, blurRadius: 18, offset: Offset(0, -4)),
+          ],
+        ),
+        child: SafeArea(
+          top: false,
+          child: NavigationBar(
+            height: 70,
+            backgroundColor: Colors.transparent,
+            indicatorColor: const Color(0xFF4D8DFF).withOpacity(0.18),
+            labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+            selectedIndex: _index,
+            onDestinationSelected: (i) => setState(() => _index = i),
+            destinations: const [
+              NavigationDestination(
+                icon: Icon(Icons.home_outlined),
+                selectedIcon: Icon(Icons.home, color: Colors.white),
+                label: 'Home',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.groups_outlined),
+                selectedIcon: Icon(Icons.groups, color: Colors.white),
+                label: 'Community',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.store_outlined),
+                selectedIcon: Icon(Icons.store, color: Colors.white),
+                label: 'Store',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.person_outline),
+                selectedIcon: Icon(Icons.person, color: Colors.white),
+                label: 'Profile',
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

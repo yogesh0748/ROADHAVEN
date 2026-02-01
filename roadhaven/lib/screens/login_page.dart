@@ -64,14 +64,22 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> _onGoogle() async {
+    print('[LoginPage] Starting Google Sign-In...');
     setState(() => _socialLoading = true);
     try {
+      print('[LoginPage] Calling AuthService.signInWithGoogle()');
       await AuthService().signInWithGoogle();
+      print('[LoginPage] Google Sign-In successful');
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const BottomNavShell()),
       );
     } catch (e) {
+      print('[LoginPage] Google Sign-In error: $e');
+      print('[LoginPage] Error type: ${e.runtimeType}');
+      if (e is Exception) {
+        print('[LoginPage] Exception details: ${e.toString()}');
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(_friendlyMessage(e))),
