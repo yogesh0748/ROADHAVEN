@@ -1,8 +1,11 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:roadhaven/services/auth_service.dart';
+import 'package:roadhaven/services/roadhaven_api.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -17,12 +20,28 @@ class _HomePageState extends State<HomePage> {
   bool _showWeather = true;
   final _sourceCtrl = TextEditingController();
   final _destCtrl = TextEditingController();
-  List<Map<String, String>> _routes = const [];
+  final _firestore = FirebaseFirestore.instance;
+  final _auth = FirebaseAuth.instance;
+  final _apiClient = RoadHavenApiClient();
+  List<_RouteSuggestion> _routes = const [];
+  bool _routesLoading = false;
+  String? _routesError;
+  String? _preferredVehicle;
+  LatLng? _currentLatLng;
+  LatLng? _inputSourceLatLng;
+  LatLng? _inputDestLatLng;
+  ShortestPathResult? _shortestPath;
+  TripQueryResult? _tripQuery;
+  TrafficResult? _trafficResult;
+  List<FuelStation> _fuelStations = const [];
+  String? _backendError;
+  List<LatLng> _backendMarkers = const [];
 
   @override
   void initState() {
     super.initState();
     _positionFuture = _determinePosition();
+    _loadPreferredVehicle();
   }
 
   @override
@@ -56,6 +75,29 @@ class _HomePageState extends State<HomePage> {
     return Geolocator.getCurrentPosition(
       desiredAccuracy: LocationAccuracy.high,
     );
+  }
+
+  Future<void> _loadPreferredVehicle() async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      final snap = await _firestore
+          .collection('profiles')
+          .doc(uid)
+          .collection('vehicles')
+          .limit(1)
+          .get();
+      if (snap.docs.isNotEmpty) {
+        final data = snap.docs.first.data();
+        final make = (data['make'] ?? '').toString().trim();
+        final model = (data['model'] ?? '').toString().trim();
+        setState(() {
+          _preferredVehicle = [make, model].where((e) => e.isNotEmpty).join(' ');
+        });
+      }
+    } catch (e) {
+      debugPrint('load vehicle failed: $e');
+    }
   }
 
   @override
@@ -127,7 +169,7 @@ class _HomePageState extends State<HomePage> {
               borderRadius: BorderRadius.circular(16),
               child: Container(
                 height: 220,
-                color: colorScheme.surfaceVariant,
+                color: colorScheme.surfaceContainerHighest,
                 child: FutureBuilder<Position>(
                   future: _positionFuture,
                   builder: (context, snapshot) {
@@ -167,6 +209,12 @@ class _HomePageState extends State<HomePage> {
                     }
 
                     final latLng = LatLng(position.latitude, position.longitude);
+                    if (_currentLatLng == null) {
+                      // Store once so we can draw polylines to route markers.
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (mounted) setState(() => _currentLatLng = latLng);
+                      });
+                    }
                     return FlutterMap(
                       options: MapOptions(
                         initialCenter: latLng,
@@ -193,8 +241,95 @@ class _HomePageState extends State<HomePage> {
                                 size: 36,
                               ),
                             ),
+                            if (_inputSourceLatLng != null)
+                              Marker(
+                                point: _inputSourceLatLng!,
+                                width: 32,
+                                height: 32,
+                                child: Tooltip(
+                                  message: 'Source',
+                                  child: const Icon(
+                                    Icons.radio_button_checked,
+                                    color: Colors.greenAccent,
+                                    size: 24,
+                                  ),
+                                ),
+                              ),
+                            if (_inputDestLatLng != null)
+                              Marker(
+                                point: _inputDestLatLng!,
+                                width: 32,
+                                height: 32,
+                                child: Tooltip(
+                                  message: 'Destination',
+                                  child: const Icon(
+                                    Icons.location_pin,
+                                    color: Colors.redAccent,
+                                    size: 26,
+                                  ),
+                                ),
+                              ),
+                            ..._routes
+                                .where((r) => r.point != null)
+                                .map(
+                                  (r) => Marker(
+                                    point: r.point!,
+                                    width: 34,
+                                    height: 34,
+                                    child: Tooltip(
+                                      message: r.title,
+                                      child: Icon(
+                                        Icons.flag,
+                                        color: colorScheme.secondary,
+                                        size: 28,
+                                      ),
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                            ..._backendMarkers
+                                .map(
+                                  (p) => Marker(
+                                    point: p,
+                                    width: 30,
+                                    height: 30,
+                                    child: Tooltip(
+                                      message: 'API marker',
+                                      child: Icon(
+                                        Icons.location_history,
+                                        color: colorScheme.tertiary,
+                                        size: 22,
+                                      ),
+                                    ),
+                                  ),
+                                )
+                                .toList(),
                           ],
                         ),
+                        if (_currentLatLng != null &&
+                            _routes.any((r) => r.point != null))
+                          PolylineLayer(
+                            polylines: _routes
+                                .where((r) => r.point != null)
+                                .map(
+                                  (r) => Polyline(
+                                    points: [_currentLatLng!, r.point!],
+                                    color: colorScheme.secondary.withOpacity(0.65),
+                                    strokeWidth: 4,
+                                  ),
+                                )
+                                .toList(),
+                          ),
+                        if (_inputSourceLatLng != null && _inputDestLatLng != null)
+                          PolylineLayer(
+                            polylines: [
+                              Polyline(
+                                points: [_inputSourceLatLng!, _inputDestLatLng!],
+                                color: colorScheme.primary.withOpacity(0.8),
+                                strokeWidth: 4,
+                              ),
+                            ],
+                          ),
                       ],
                     );
                   },
@@ -286,62 +421,168 @@ class _HomePageState extends State<HomePage> {
                     child: ElevatedButton.icon(
                       icon: const Icon(Icons.alt_route),
                       label: const Text('Fetch best 3 routes'),
-                      onPressed: _buildSuggestions,
+                      onPressed: _routesLoading ? null : _buildSuggestions,
                     ),
                   ),
                   const SizedBox(height: 12),
-                  if (_routes.isNotEmpty) ...[
+                  if (_routesLoading)
+                    Row(
+                      children: const [
+                        SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+                        SizedBox(width: 10),
+                        Text('Fetching community routes...'),
+                      ],
+                    ),
+                  if (_routesError != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        _routesError!,
+                        style: textTheme.bodyMedium?.copyWith(color: colorScheme.error),
+                      ),
+                    ),
+                  if (!_routesLoading && _routes.isNotEmpty) ...[
                     Text(
                       'Suggested routes from community:',
                       style: textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w700),
                     ),
                     const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
+                    Column(
                       children: _routes
-                          .map((r) => Chip(label: Text('${r['label']}: ${r['summary']}')))
+                          .map(
+                            (r) => ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: CircleAvatar(child: Text(r.label)),
+                              title: Text(r.title),
+                              subtitle: Text(r.summary),
+                              trailing: r.rating != null
+                                  ? Chip(label: Text('★ ${r.rating!.toStringAsFixed(1)}'))
+                                  : null,
+                            ),
+                          )
                           .toList(),
                     ),
-                    const SizedBox(height: 12),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: Container(
-                        height: 200,
-                        color: colorScheme.surfaceVariant,
-                        padding: const EdgeInsets.all(12),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Tap to highlight route'),
-                            const SizedBox(height: 8),
-                            Wrap(
-                              spacing: 8,
-                              children: _routes
-                                  .map((r) => OutlinedButton(
-                                        onPressed: () {},
-                                        child: Text('Route ${r['label']}'),
-                                      ))
-                                  .toList(),
-                            ),
-                            const Spacer(),
-                            const Center(child: Icon(Icons.map, size: 48)),
-                            const SizedBox(height: 8),
-                            Text('Preview of routes A/B/C on map'),
-                          ],
-                        ),
+                  ],
+                  if (!_routesLoading && _routes.isEmpty && _routesError == null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        'No community suggestions for this route yet.',
+                        style: textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
                       ),
                     ),
+                  const SizedBox(height: 12),
+                  if (_backendError != null)
+                    Text(
+                      'Backend: $_backendError',
+                      style: textTheme.bodyMedium?.copyWith(color: colorScheme.error),
+                    ),
+                  if (_shortestPath != null)
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.alt_route),
+                      title: const Text('Shortest path (API)'),
+                      subtitle: Text(
+                        _shortestPath!.path.isNotEmpty
+                            ? _shortestPath!.path.join(' -> ')
+                            : (_shortestPath!.response ?? 'Result received'),
+                      ),
+                      trailing: _shortestPath!.distanceKm != null
+                          ? Chip(
+                              label: Text(
+                                '${_shortestPath!.distanceKm!.toStringAsFixed(1)} km',
+                              ),
+                            )
+                          : null,
+                    ),
+                  if (_tripQuery != null)
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.map_outlined),
+                      title: const Text('Trip plan (API)'),
+                      subtitle: Text(_tripQuery!.response ?? 'Trip planned'),
+                      trailing: _tripQuery!.routeId != null
+                          ? Chip(label: Text('Route ${_tripQuery!.routeId}'))
+                          : null,
+                    ),
+                  if (_trafficResult != null)
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.traffic),
+                      title: const Text('Traffic analysis'),
+                      subtitle: Text(
+                        [
+                          _trafficResult!.summary,
+                          _trafficResult!.delayMinutes != null
+                              ? '${_trafficResult!.delayMinutes!.toStringAsFixed(1)} min delay'
+                              : null,
+                          if (_trafficResult!.incidents.isNotEmpty)
+                            _trafficResult!.incidents.take(2).join(' | '),
+                        ].whereType<String>().join(' | '),
+                      ),
+                    ),
+                  if (_fuelStations.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      'Nearby fuel stations (API):',
+                      style: textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 4),
+                    ..._fuelStations.take(3).map(
+                          (s) => ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: const Icon(Icons.local_gas_station),
+                            title: Text(s.name),
+                            subtitle: Text([
+                              if (s.brand != null && s.brand!.isNotEmpty) s.brand,
+                              if (s.distanceKm != null)
+                                '${s.distanceKm!.toStringAsFixed(1)} km',
+                              if (s.pricePerLiter != null)
+                                'INR ${s.pricePerLiter!.toStringAsFixed(2)}/L',
+                            ].whereType<String>().join(' | ')),
+                            trailing: s.rating != null ? Text('★ ${s.rating!.toStringAsFixed(1)}') : null,
+                          ),
+                        ),
                   ],
                 ],
               ),
             ),
           ),
+          const SizedBox(height: 12),
+          if (_tripTipsForVehicle().isNotEmpty)
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Trip suggestions${_preferredVehicle != null ? ' for $_preferredVehicle' : ''}',
+                      style: textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 8),
+                    ..._tripTipsForVehicle().map(
+                      (tip) => Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.lightbulb_outline, size: 16),
+                            const SizedBox(width: 8),
+                            Expanded(child: Text(tip)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
         ],
       ),
     );
   }
 
-  void _buildSuggestions() {
+  Future<void> _buildSuggestions() async {
     final src = _sourceCtrl.text.trim();
     final dst = _destCtrl.text.trim();
     if (src.isEmpty || dst.isEmpty) {
@@ -350,23 +591,153 @@ class _HomePageState extends State<HomePage> {
       );
       return;
     }
-    // Placeholder: in a real app, query community_reviews for bestPaths containing these areas.
+
     setState(() {
-      _routes = [
-        {
-          'label': 'A',
-          'summary': 'Fastest via highway (community pick)',
-        },
-        {
-          'label': 'B',
-          'summary': 'Scenic route with fewer tolls',
-        },
-        {
-          'label': 'C',
-          'summary': 'Fuel-efficient path with fewer stops',
-        },
-      ];
+      _routesLoading = true;
+      _routesError = null;
+      _backendError = null;
     });
+
+    // Try to parse coordinates from input (format: "lat,lng").
+    _inputSourceLatLng = _parseLatLng(src);
+    _inputDestLatLng = _parseLatLng(dst);
+
+    try {
+      await Future.wait([
+        _fetchCommunityRoutes(src, dst),
+        _fetchBackendInsights(src, dst),
+      ]);
+    } finally {
+      if (mounted) {
+        setState(() => _routesLoading = false);
+      }
+    }
+  }
+
+  Future<void> _fetchCommunityRoutes(String src, String dst) async {
+    try {
+      final snap = await _firestore
+          .collection('community_reviews')
+          .orderBy('createdAt', descending: true)
+          .limit(50)
+          .get();
+
+      final matches = snap.docs
+          .map((d) => d.data())
+          .where((data) {
+            final route = (data['route'] ?? data['tripTitle'] ?? '').toString().toLowerCase();
+            return route.contains(src.toLowerCase()) && route.contains(dst.toLowerCase());
+          })
+          .toList();
+
+      if (matches.isEmpty) {
+        setState(() {
+          _routes = const [];
+        });
+        return;
+      }
+
+      matches.sort((a, b) {
+        final ar = (a['overallRating'] ?? 0).toString();
+        final br = (b['overallRating'] ?? 0).toString();
+        final ai = double.tryParse(ar) ?? 0;
+        final bi = double.tryParse(br) ?? 0;
+        return bi.compareTo(ai);
+      });
+
+      final best = matches.take(3).toList();
+
+      final suggestions = <_RouteSuggestion>[];
+      int label = 65; // 'A'
+      for (final d in best) {
+        final loc = d['location'] as Map<String, dynamic>?;
+        final lat = loc?['lat'];
+        final lng = loc?['lng'];
+        suggestions.add(
+          _RouteSuggestion(
+            label: String.fromCharCode(label++),
+            title: (d['route'] ?? d['tripTitle'] ?? 'Community route').toString(),
+            summary: (d['description'] ?? 'Popular with riders').toString(),
+            rating: double.tryParse(d['overallRating']?.toString() ?? ''),
+            vehicle: (d['vehicle'] ?? d['vehicleType'] ?? '').toString(),
+            tags: (d['tags'] is Map)
+                ? (d['tags'] as Map)
+                    .values
+                    .expand((e) => (e as List).map((x) => x.toString()))
+                    .toList()
+                : const [],
+            point: (lat is num && lng is num) ? LatLng(lat.toDouble(), lng.toDouble()) : null,
+          ),
+        );
+      }
+
+      setState(() {
+        _routes = suggestions;
+      });
+    } catch (e) {
+      setState(() {
+        _routesError = 'Could not fetch routes: $e';
+      });
+    }
+  }
+
+  Future<void> _fetchBackendInsights(String src, String dst) async {
+    final errors = <String>[];
+    ShortestPathResult? shortest;
+    TripQueryResult? trip;
+    TrafficResult? traffic;
+    List<FuelStation> fuel = const [];
+    List<LatLng> apiMarkers = const [];
+
+    try {
+      shortest = await _apiClient.shortestPath(src, dst);
+    } catch (e) {
+      errors.add('shortest-path: $e');
+    }
+
+    try {
+      trip = await _apiClient.queryTrip(src, dst);
+      apiMarkers = trip?.markers ?? const [];
+    } catch (e) {
+      errors.add('query: $e');
+    }
+
+    final start = _inputSourceLatLng ?? _currentLatLng;
+    final end = _inputDestLatLng ?? _currentLatLng;
+    if (start != null && end != null) {
+      try {
+        traffic = await _apiClient.trafficAnalysis(start, end);
+      } catch (e) {
+        errors.add('traffic: $e');
+      }
+    }
+
+    if (start != null) {
+      try {
+        fuel = await _apiClient.fuelStations(start.latitude, start.longitude, radiusKm: 5);
+      } catch (e) {
+        errors.add('fuel: $e');
+      }
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _shortestPath = shortest;
+      _tripQuery = trip;
+      _trafficResult = traffic;
+      _fuelStations = fuel;
+      _backendMarkers = apiMarkers;
+      _backendError = errors.isEmpty ? null : errors.join(' | ');
+    });
+  }
+
+  LatLng? _parseLatLng(String text) {
+    final parts = text.split(',');
+    if (parts.length != 2) return null;
+    final lat = double.tryParse(parts[0].trim());
+    final lng = double.tryParse(parts[1].trim());
+    if (lat == null || lng == null) return null;
+    return LatLng(lat, lng);
   }
 
   List<Map<String, String>> _buildMockForecast() {
@@ -380,4 +751,46 @@ class _HomePageState extends State<HomePage> {
             })
         .toList();
   }
+
+  List<String> _tripTipsForVehicle() {
+    final v = _preferredVehicle?.toLowerCase() ?? '';
+    final tips = <String>[];
+    if (v.contains('bike') || v.contains('motor') || v.contains('duke') || v.contains('pulsar')) {
+      tips.addAll([
+        'Check chain tension and lube before starting.',
+        'Carry rain gear and a compact tool kit for roadside fixes.',
+        'Prefer routes with fuel stops every 80-100 km.',
+      ]);
+    } else {
+      tips.addAll([
+        'Verify tire pressure and coolant levels.',
+        'Keep a power bank and offline maps downloaded.',
+        'Plan hydration stops every 60-90 minutes.',
+      ]);
+    }
+    if (_routes.isNotEmpty && _routes.first.tags.isNotEmpty) {
+      tips.add('Community tags: ${_routes.first.tags.take(4).join(', ')}');
+    }
+    return tips;
+  }
+}
+
+class _RouteSuggestion {
+  const _RouteSuggestion({
+    required this.label,
+    required this.title,
+    required this.summary,
+    this.rating,
+    this.vehicle,
+    this.tags = const [],
+    this.point,
+  });
+
+  final String label;
+  final String title;
+  final String summary;
+  final double? rating;
+  final String? vehicle;
+  final List<String> tags;
+  final LatLng? point;
 }
