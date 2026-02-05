@@ -19,6 +19,78 @@ class RoadHavenApiClient {
     return candidate.isNotEmpty ? candidate : _defaultBaseUrl;
   }
 
+  /// Geocode a freeform query to a single coordinate using Nominatim (OpenStreetMap).
+  Future<LatLng?> geocodeLatLng(String query) async {
+    final uri = Uri.https(
+      'nominatim.openstreetmap.org',
+      '/search',
+      {
+        'q': query,
+        'format': 'json',
+        'limit': '1',
+      },
+    );
+    final res = await _client
+        .get(
+          uri,
+          headers: {'User-Agent': 'RoadHaven/1.0 (+https://roadhaven.app)'},
+        )
+        .timeout(_timeout);
+    final decoded = _decode(res);
+    final list = decoded is List
+        ? decoded
+        : (decoded is Map && decoded['results'] is List
+            ? decoded['results'] as List
+            : const []);
+    if (list.isEmpty) return null;
+    final first = list.first;
+    if (first is Map) {
+      final lat = double.tryParse(first['lat']?.toString() ?? '');
+      final lon = double.tryParse(first['lon']?.toString() ?? first['lng']?.toString() ?? '');
+      if (lat != null && lon != null) {
+        return LatLng(lat, lon);
+      }
+    }
+    return null;
+  }
+
+  /// Fetch a route between two coordinates using the public OSRM OpenStreetMap router.
+  Future<OsmRoute?> openStreetMapRoute(LatLng start, LatLng end, {String profile = 'driving'}) async {
+    final uri = Uri.parse(
+      'https://router.project-osrm.org/route/v1/$profile/${start.longitude},${start.latitude};${end.longitude},${end.latitude}?overview=full&geometries=geojson',
+    );
+    final res = await _client.get(uri).timeout(_timeout);
+    final decoded = _decode(res);
+    if (decoded is Map<String, dynamic>) {
+      return OsmRoute.fromOsrm(decoded);
+    }
+    return null;
+  }
+
+  /// Fetch multiple alternative routes from OSRM. Returns best-first list.
+  Future<List<OsmRoute>> openStreetMapRoutes(
+    LatLng start,
+    LatLng end, {
+    String profile = 'driving',
+    int alternatives = 3,
+  }) async {
+    final params = {
+      'overview': 'full',
+      'geometries': 'geojson',
+      'alternatives': alternatives.toString(),
+    };
+    final query = params.entries.map((e) => '${e.key}=${e.value}').join('&');
+    final uri = Uri.parse(
+      'https://router.project-osrm.org/route/v1/$profile/${start.longitude},${start.latitude};${end.longitude},${end.latitude}?$query',
+    );
+    final res = await _client.get(uri).timeout(_timeout);
+    final decoded = _decode(res);
+    if (decoded is Map<String, dynamic> && decoded['routes'] is List) {
+      return OsmRoute.listFromOsrm(decoded);
+    }
+    return const <OsmRoute>[];
+  }
+
   Future<ShortestPathResult?> shortestPath(
     String start,
     String end, {
@@ -239,6 +311,61 @@ class FuelStation {
           : const <String>[],
       point: point,
     );
+  }
+}
+
+class OsmRoute {
+  const OsmRoute({
+    required this.points,
+    this.distanceKm,
+    this.durationMinutes,
+    this.summary,
+  });
+
+  final List<LatLng> points;
+  final double? distanceKm;
+  final double? durationMinutes;
+  final String? summary;
+
+  factory OsmRoute.fromOsrm(Map<String, dynamic> json) {
+    final routes = json['routes'];
+    if (routes is! List || routes.isEmpty) {
+      return const OsmRoute(points: <LatLng>[]);
+    }
+    final first = routes.first;
+    if (first is! Map) {
+      return const OsmRoute(points: <LatLng>[]);
+    }
+    final distanceKm = _toDouble(first['distance']);
+    final durationMin = _toDouble(first['duration']);
+    final summary = first['legs'] is List && (first['legs'] as List).isNotEmpty
+        ? (first['legs'].first['summary']?.toString())
+        : null;
+    List<LatLng> coords = const [];
+    final geometry = first['geometry'];
+    if (geometry is Map && geometry['coordinates'] is List) {
+      coords = _extractCoords(geometry['coordinates']);
+    } else if (first['legs'] is List) {
+      coords = _extractCoords(first['legs']);
+    }
+    return OsmRoute(
+      points: coords,
+      distanceKm: distanceKm != null ? distanceKm / 1000 : null,
+      durationMinutes: durationMin != null ? durationMin / 60 : null,
+      summary: summary,
+    );
+  }
+
+  static List<OsmRoute> listFromOsrm(Map<String, dynamic> json) {
+    final routes = json['routes'];
+    if (routes is! List || routes.isEmpty) return const <OsmRoute>[];
+    return routes
+        .whereType<Map>()
+        .map((routeMap) {
+          final wrapper = {'routes': [routeMap]};
+          return OsmRoute.fromOsrm(wrapper);
+        })
+        .toList();
   }
 }
 

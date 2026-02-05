@@ -5,6 +5,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:roadhaven/services/auth_service.dart';
+import 'package:roadhaven/screens/map_page.dart';
 import 'package:roadhaven/services/roadhaven_api.dart';
 
 class HomePage extends StatefulWidget {
@@ -36,6 +37,8 @@ class _HomePageState extends State<HomePage> {
   List<FuelStation> _fuelStations = const [];
   String? _backendError;
   List<LatLng> _backendMarkers = const [];
+  OsmRoute? _osmRoute;
+  String? _osmRouteError;
 
   @override
   void initState() {
@@ -306,6 +309,16 @@ class _HomePageState extends State<HomePage> {
                                 .toList(),
                           ],
                         ),
+                        if (_osmRoute?.points.isNotEmpty == true)
+                          PolylineLayer(
+                            polylines: [
+                              Polyline(
+                                points: _osmRoute!.points,
+                                color: colorScheme.primary.withOpacity(0.9),
+                                strokeWidth: 5,
+                              ),
+                            ],
+                          ),
                         if (_currentLatLng != null &&
                             _routes.any((r) => r.point != null))
                           PolylineLayer(
@@ -395,6 +408,15 @@ class _HomePageState extends State<HomePage> {
             ),
             const SizedBox(height: 24),
           ],
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              icon: const Icon(Icons.map_outlined),
+              label: const Text('Open map page'),
+              onPressed: () => _openMapPage(context),
+            ),
+          ),
+          const SizedBox(height: 12),
           Text(
             'Plan a trip',
             style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
@@ -476,6 +498,25 @@ class _HomePageState extends State<HomePage> {
                     Text(
                       'Backend: $_backendError',
                       style: textTheme.bodyMedium?.copyWith(color: colorScheme.error),
+                    ),
+                  if (_osmRouteError != null)
+                    Text(
+                      'OpenStreetMap: $_osmRouteError',
+                      style: textTheme.bodyMedium?.copyWith(color: colorScheme.error),
+                    ),
+                  if (_osmRoute != null && _osmRoute!.points.isNotEmpty)
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.route),
+                      title: const Text('OpenStreetMap route'),
+                      subtitle: Text(
+                        [
+                          if (_osmRoute!.distanceKm != null)
+                            '${_osmRoute!.distanceKm!.toStringAsFixed(1)} km',
+                          if (_osmRoute!.durationMinutes != null)
+                            '${_osmRoute!.durationMinutes!.toStringAsFixed(0)} min est.',
+                        ].whereType<String>().join(' • '),
+                      ),
                     ),
                   if (_shortestPath != null)
                     ListTile(
@@ -582,6 +623,12 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  void _openMapPage(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const MapPage()),
+    );
+  }
+
   Future<void> _buildSuggestions() async {
     final src = _sourceCtrl.text.trim();
     final dst = _destCtrl.text.trim();
@@ -596,16 +643,51 @@ class _HomePageState extends State<HomePage> {
       _routesLoading = true;
       _routesError = null;
       _backendError = null;
+      _osmRouteError = null;
+      _osmRoute = null;
+      _backendMarkers = const [];
     });
 
-    // Try to parse coordinates from input (format: "lat,lng").
-    _inputSourceLatLng = _parseLatLng(src);
-    _inputDestLatLng = _parseLatLng(dst);
+    // Try to parse coordinates from input (format: "lat,lng"), otherwise geocode.
+    LatLng? resolvedSrc = _parseLatLng(src);
+    LatLng? resolvedDst = _parseLatLng(dst);
+    String? geocodeError;
+
+    if (resolvedSrc == null) {
+      try {
+        resolvedSrc = await _apiClient.geocodeLatLng(src);
+      } catch (e) {
+        geocodeError = 'Source lookup failed: $e';
+      }
+    }
+    if (resolvedDst == null) {
+      try {
+        resolvedDst = await _apiClient.geocodeLatLng(dst);
+      } catch (e) {
+        geocodeError = geocodeError ?? 'Destination lookup failed: $e';
+      }
+    }
+
+    if (!mounted) return;
+
+    if (resolvedSrc == null || resolvedDst == null) {
+      setState(() {
+        _routesLoading = false;
+        _routesError = geocodeError ?? 'Could not resolve both locations on map.';
+      });
+      return;
+    }
+
+    setState(() {
+      _inputSourceLatLng = resolvedSrc;
+      _inputDestLatLng = resolvedDst;
+    });
 
     try {
       await Future.wait([
         _fetchCommunityRoutes(src, dst),
-        _fetchBackendInsights(src, dst),
+        _fetchBackendInsights(src, dst, start: resolvedSrc, end: resolvedDst),
+        _fetchOsmRoute(resolvedSrc, resolvedDst),
       ]);
     } finally {
       if (mounted) {
@@ -625,8 +707,21 @@ class _HomePageState extends State<HomePage> {
       final matches = snap.docs
           .map((d) => d.data())
           .where((data) {
-            final route = (data['route'] ?? data['tripTitle'] ?? '').toString().toLowerCase();
-            return route.contains(src.toLowerCase()) && route.contains(dst.toLowerCase());
+            final srcLower = src.toLowerCase();
+            final dstLower = dst.toLowerCase();
+            final location = data['location'];
+            final locationLabel = location is Map
+                ? [location['label'], location['landmark']]
+                    .whereType<String>()
+                    .map((e) => e.toLowerCase())
+                    .join(' ')
+                : '';
+            final haystack = [
+              data['route'],
+              data['tripTitle'],
+              locationLabel,
+            ].whereType<String>().map((e) => e.toLowerCase()).join(' ');
+            return haystack.contains(srcLower) && haystack.contains(dstLower);
           })
           .toList();
 
@@ -681,7 +776,7 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Future<void> _fetchBackendInsights(String src, String dst) async {
+  Future<void> _fetchBackendInsights(String src, String dst, {LatLng? start, LatLng? end}) async {
     final errors = <String>[];
     ShortestPathResult? shortest;
     TripQueryResult? trip;
@@ -702,19 +797,19 @@ class _HomePageState extends State<HomePage> {
       errors.add('query: $e');
     }
 
-    final start = _inputSourceLatLng ?? _currentLatLng;
-    final end = _inputDestLatLng ?? _currentLatLng;
-    if (start != null && end != null) {
+    final startCoords = start ?? _inputSourceLatLng ?? _currentLatLng;
+    final endCoords = end ?? _inputDestLatLng ?? _currentLatLng;
+    if (startCoords != null && endCoords != null) {
       try {
-        traffic = await _apiClient.trafficAnalysis(start, end);
+        traffic = await _apiClient.trafficAnalysis(startCoords, endCoords);
       } catch (e) {
         errors.add('traffic: $e');
       }
     }
 
-    if (start != null) {
+    if (startCoords != null) {
       try {
-        fuel = await _apiClient.fuelStations(start.latitude, start.longitude, radiusKm: 5);
+        fuel = await _apiClient.fuelStations(startCoords.latitude, startCoords.longitude, radiusKm: 5);
       } catch (e) {
         errors.add('fuel: $e');
       }
@@ -729,6 +824,22 @@ class _HomePageState extends State<HomePage> {
       _backendMarkers = apiMarkers;
       _backendError = errors.isEmpty ? null : errors.join(' | ');
     });
+  }
+
+  Future<void> _fetchOsmRoute(LatLng start, LatLng end) async {
+    try {
+      final route = await _apiClient.openStreetMapRoute(start, end);
+      if (!mounted) return;
+      setState(() {
+        _osmRoute = route;
+        _osmRouteError = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _osmRouteError = 'Route failed: $e';
+      });
+    }
   }
 
   LatLng? _parseLatLng(String text) {
